@@ -16,11 +16,16 @@ logger = logging.getLogger(__name__)
 
 # ── Cấu hình ──────────────────────────────────────────────────────────────────
 BOT_TOKEN    = os.environ["BOT_TOKEN"]
+PW_CONFIG    = os.environ.get("PW_CONFIG", "")          # mật khẩu để đổi Facebook URL
 
 AFF_ID       = os.environ.get("AFF_ID",       "17325690040")
 SUB_ID       = os.environ.get("SUB_ID",       "fb-voucher")
-FACEBOOK_URL = os.environ.get("FACEBOOK_URL", "https://www.facebook.com/share/p/1EAjKXe3mr/")
 WORKER_API   = os.environ.get("WORKER_API",   "https://shopee-link.lamtypre.workers.dev/")
+
+# Dùng dict để có thể thay đổi trong runtime
+config = {
+    "facebook_url": os.environ.get("FACEBOOK_URL", "https://www.facebook.com/share/p/1EAjKXe3mr/")
+}
 
 SHOPEE_RE = re.compile(
     r"https?://(?:s\.shopee\.vn|shope\.ee|shopee\.vn|shopee\.com)/[^\s]+"
@@ -62,6 +67,29 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
+async def handle_set_facebook(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Xử lý lệnh /{PW_CONFIG} <url> để cập nhật Facebook URL."""
+    if not PW_CONFIG:
+        return
+
+    text = update.message.text or ""
+    # Lấy phần URL sau command
+    parts = text.split(maxsplit=1)
+    if len(parts) < 2:
+        await update.message.reply_text("❌ Thiếu URL. Dùng: /" + PW_CONFIG + " <facebook_url>")
+        return
+
+    new_url = parts[1].strip()
+    parsed = urlparse(new_url)
+    if parsed.scheme not in ("http", "https") or not parsed.netloc:
+        await update.message.reply_text("❌ URL không hợp lệ.")
+        return
+
+    config["facebook_url"] = new_url
+    logger.info("Facebook URL đã cập nhật: %s", new_url)
+    await update.message.reply_text(f"✅ Đã cập nhật Facebook URL:\n{new_url}")
+
+
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text or update.message.caption or ""
     links = SHOPEE_RE.findall(text)
@@ -88,7 +116,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         lines.append(f"{prefix}<code>{aff}</code>")
 
     reply = "\n\n".join(lines)
-    reply += f'\n\n💬 <a href="{FACEBOOK_URL}">👉 Vào Facebook lấy mã giảm giá</a>'
+    reply += f'\n\n💬 <a href="{config["facebook_url"]}">👉 Vào Facebook lấy mã giảm giá</a>'
 
     await update.message.reply_text(
         reply,
@@ -101,6 +129,12 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 def main():
     app = Application.builder().token(BOT_TOKEN).build()
     app.add_handler(CommandHandler("start", cmd_start))
+
+    # Đăng ký command bí mật để đổi Facebook URL
+    if PW_CONFIG:
+        app.add_handler(CommandHandler(PW_CONFIG, handle_set_facebook))
+        logger.info("Command bí mật đã đăng ký: /%s", PW_CONFIG)
+
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     app.add_handler(MessageHandler(filters.CAPTION & ~filters.COMMAND, handle_message))
 
